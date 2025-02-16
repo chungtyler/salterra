@@ -296,12 +296,16 @@ const char html[] PROGMEM = R"rawliteral(
 int left_motor_en = 32;
 int left_motor_pin1 = 33;
 int left_motor_pin2 = 25;
+int left_motor_channel = 1;
 
 int right_motor_en = 14;
 int right_motor_pin1 = 26;
 int right_motor_pin2 = 27;
+int right_motor_channel = 2;
 
-int max_speed = 50;
+int max_speed = 255-73;
+int pwm_frequency = 1000;
+int pwm_resolution = 8;
 
 //Initialize System Parameters
 float temperature = 0.0;
@@ -318,7 +322,7 @@ int joystick_lower = -100;
 
 //Setup Servo
 Servo myServo;
-int servoPin = 12;
+int servoPin = 21;
 int servo_active_angle = 90;
 int servo_inactive_angle = 0;
 
@@ -332,16 +336,23 @@ unsigned long prev_time = 0;
 const long time_delay = 100;
 unsigned long prev_servo_time = 0;
 int step = 0;
+int manual_step = 0;
 
 void setup() {
   Serial.begin(115200);
 
+  ledcSetup(left_motor_channel, pwm_frequency, pwm_resolution);
+  ledcAttachPin(left_motor_en, left_motor_channel);
+
+  ledcSetup(right_motor_channel, pwm_frequency, pwm_resolution);
+  ledcAttachPin(right_motor_en, right_motor_channel);
+
   // Setup Motor Pins
-  pinMode(left_motor_en,  OUTPUT); 
+  //pinMode(left_motor_en,  OUTPUT); 
   pinMode(left_motor_pin1, OUTPUT);
   pinMode(left_motor_pin2, OUTPUT);
 
-  pinMode(right_motor_en, OUTPUT);
+  //pinMode(right_motor_en, OUTPUT);
   pinMode(right_motor_pin1, OUTPUT);
   pinMode(right_motor_pin2, OUTPUT);
 
@@ -383,8 +394,8 @@ void setup() {
     if (request->hasParam("state")) {
         String state = request->getParam("state")->value();
         servo_state = (state == "true");  // Convert to boolean
-        Serial.print("Servo State: ");
-        Serial.println(servo_state);
+        //Serial.print("Servo State: ");
+        //Serial.println(servo_state);
         request->send(200, "text/plain", "Servo updated");
     } else {
         request->send(400, "text/plain", "Bad Request");
@@ -398,8 +409,8 @@ void setup() {
   server.on("/mode", HTTP_GET, [](AsyncWebServerRequest *request){
     if (request->hasParam("state")) {
         mode = request->getParam("state")->value();
-        Serial.print("Robot Mode: "); 
-        Serial.println(mode);
+        //Serial.print("Robot Mode: "); 
+        //Serial.println(mode);
         request->send(200, "text/plain", "Mode updated to " + mode);
     } else {
         request->send(400, "text/plain", "Bad Request");
@@ -428,12 +439,10 @@ void loop() {
 void handle_auto() {
   unsigned long current_time = millis();
 
-  set_motor_speed(40, 40);
+  set_motor_speed(-max_speed, -max_speed);
   switch (step) {
     case 0: // Wait 500ms before moving servo
-      Serial.println("Calling Case 0");
       if (current_time - prev_servo_time >= 500) {
-        Serial.println("Servo in Case 0 Moved");
         myServo.write(servo_active_angle);
         prev_servo_time = current_time;
         step = 1;
@@ -441,9 +450,7 @@ void handle_auto() {
       break;
 
     case 1: // Wait 100ms before moving servo back
-      Serial.println("Calling Case 1");
       if (current_time - prev_servo_time >= 100) {
-        Serial.println("Servo in Case 1 Moved");
         myServo.write(servo_inactive_angle);
         prev_servo_time = current_time;
         step = 0; // Restart cycle
@@ -456,10 +463,10 @@ void handle_sensor_data(AsyncWebServerRequest *request) {
   // Read temperature and humidity from the sensor
   humidity = dht.readHumidity();
   temperature = dht.readTemperature();
-  Serial.print("Humidity: ");
-  Serial.print(humidity);
-  Serial.print(" || Temp: ");
-  Serial.println(temperature);
+  //Serial.print("Humidity: ");
+  //Serial.print(humidity);
+  //Serial.print(" || Temp: ");
+  //Serial.println(temperature);
 
   // Check if the readings failed
   if (isnan(humidity) || isnan(temperature)) {
@@ -476,10 +483,13 @@ void handle_sensor_data(AsyncWebServerRequest *request) {
 
 void handle_salt_drop() {
   if (prev_servo_state != servo_state) {
+    Serial.println("New State Matched");
     prev_servo_state = servo_state;
-    if (servo_state == true) {
+    if (servo_state == 1) {
+      Serial.println("GO 90");
       myServo.write(servo_active_angle);
     } else {
+      Serial.println("GO 0");
       myServo.write(servo_inactive_angle);
     }
   }
@@ -530,13 +540,16 @@ void set_motor_speed(int left_signal, float right_signal) {
 
 // Rotate the Left Motor
 void left_motor_move(int state, int pwm) {
-  analogWrite(left_motor_en, pwm);
+  if (pwm == 0) {
+    ledcWrite(left_motor_channel, 0);
+  } else {
+    ledcWrite(left_motor_channel, pwm+73);
+  }
+  //analogWrite(left_motor_en, pwm);
   if (state > 1) {
-    Serial.println("right");
     digitalWrite(left_motor_pin1,  HIGH);
     digitalWrite(left_motor_pin2, LOW);
   } else if (state < -1) {
-    Serial.println("left");
     digitalWrite(left_motor_pin1,  LOW);
     digitalWrite(left_motor_pin2, HIGH);
   } else {
@@ -547,7 +560,8 @@ void left_motor_move(int state, int pwm) {
 
 // Rotate the Right Motor
 void right_motor_move(int state, int pwm) {
-  analogWrite(right_motor_en, pwm);
+  ledcWrite(right_motor_channel, pwm);
+  //analogWrite(right_motor_en, pwm);
   if (state > 1) {
     digitalWrite(right_motor_pin1,  HIGH);
     digitalWrite(right_motor_pin2, LOW);
